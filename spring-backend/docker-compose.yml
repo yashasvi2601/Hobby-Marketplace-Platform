@@ -1,0 +1,30 @@
+version: "2"
+
+services:
+  postgresdb:
+    image: postgres:16
+
+    networks:
+      - springpostgres-net
+    environment:
+      - POSTGRES_PASSWORD=1
+      - POSTGRES_DB=hobbie_backend_db
+
+  spring-backend:
+    image: spring-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - spring.datasource.url=jdbc:postgresql://postgresdb:5432/hobbie_backend_db
+      - spring.datasource.username=postgres
+      - spring.datasource.password=1
+    networks:
+      - springpostgres-net
+    depends_on:
+      - postgresdb
+
+networks:
+  springpostgres-net:
