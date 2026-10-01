@@ -1,118 +1,91 @@
+# Hobby Marketplace Platform
 
-<b>ReactJS-Spring-Boot-Full-Stack-App</b>
-<hr>
+A full-stack web app that connects people looking for a new hobby with local
+businesses offering activities (classes, workshops, meetups, etc.). Users take
+a short quiz to get matched with activities near them, and business owners can
+list and manage their own offers.
 
-This project consists of two applications: one is a Spring Boot Rest API
-called spring-backend and another is a ReactJS application called
-react-frontend.
+## How it works
 
-Service-oriented platform focusing on establishing and maintaining
-connections between consumers and small businesses in the The Arts,
-Entertainment, and Recreation sector.
+- **App clients** (regular users) sign up, take a short multiple-choice quiz
+  (interests + location), and get a set of hobby suggestions matched against
+  their answers. They can also browse all listings and save favorites.
+- **Business owners** sign up separately, and can create, edit, and delete
+  hobby listings (name, description, price, category, location, photos,
+  contact info).
+- Matching is rule-based: listings are filtered by the user's selected
+  location, then checked against the categories picked in the quiz. There's
+  no ML/AI involved — it's a straightforward filter over the data.
+- Authentication is JWT-based, with three roles: `USER`, `BUSINESS_USER`, and
+  `ADMIN`.
 
-Click [here](https://www.hobbie.ch) to view the application.
-This application is subject to Copyright.
+## Tech stack
 
-<b>Applications</b>
-<hr>
+**Frontend** — `react-frontend/`
+- React 17 + Ionic React components
+- React Router, Formik + Yup for forms/validation
+- Axios for API calls (with auto token refresh)
 
- <b> - spring-backend</b>
+**Backend** — `spring-backend/`
+- Spring Boot 2.4 (Java 17)
+- Spring Data JPA / Hibernate, PostgreSQL
+- Spring Security + JWT
+- Cloudinary for image uploads, Spring Mail for notifications
+- springdoc-openapi / Swagger UI for API docs
 
-Spring Boot Web Java backend application that exposes a REST API to
-manage hobbies. Its secured endpoints can just be accessed if an access
-token (JWT) is provided.
+## Project structure
 
-spring-backend stores its data in a PostgreSQL database.
+```
+react-frontend/   React SPA (runs on :4200)
+spring-backend/   Spring Boot REST API (runs on :8080)
+```
 
-spring-backend has the following endpoints
+## Running locally
 
+### Prerequisites
+- Node.js 16+ and npm
+- Java 17
+- A local PostgreSQL instance
 
-<b>-react-frontend</b>
+### 1. Database
+Create a database and update the connection details in
+`spring-backend/src/main/resources/application.properties`:
 
-ReactJS frontend application where users can find and save hobbies and businesses can manage offers. In order to access the application, user / business must login using his/her username and password.  All the requests coming from react-frontend to secured endpoints in spring-backend have a access token (JWT) that is generated when user / business logs in.
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/hobbie_backend_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+```
 
-react-frontend uses Semantic UI React as CSS-styled framework.
+`spring.jpa.hibernate.ddl-auto=update` is set, so the schema is created/updated
+automatically on startup — no manual migrations needed.
 
-<b>Prerequisites</b>
-<hr>
+### 2. Backend
 
--Java 11+
+```bash
+cd spring-backend
+./mvnw spring-boot:run
+```
 
--npm
+Runs on `http://localhost:8080`. On first startup, the app seeds:
+- Demo logins: `user` / `topsecret` (app client) and `business` / `topsecret`
+  (business owner)
+- All hobby categories and locations
+- A handful of sample hobby listings under the `business` account
 
--JWT 
+API docs are available at `http://localhost:8080/swagger-ui/index.html`.
 
-<b>Set up</b>
+### 3. Frontend
 
-<hr></hr>
+```bash
+cd react-frontend
+npm install
+npm start
+```
 
-Clone the repository:
+Runs on `http://localhost:4200` and talks to the backend on `:8080`.
 
-<pre>git clone https://github.com/purshink/ReactJS-Spring-Boot-Full-Stack-App.git</pre>
-
-Navigate to the newly created folder:
-
-<pre>cd  ReactJS-Spring-Boot-Full-Stack-App</pre>
- 
-
-<b>Frontend -</b>
-
-Install NodeJs.v.16.13.1 /npm v.8.3.0
-
-Navigate to react-frontend subfolder:
- 
-<pre>cd react-frontend</pre>
-
-Install the modules
-
-<pre>npm i</pre>
-
-Start the application on local host:
-
-<pre>npm start</pre>
-
-Navigate to:
-
-http://localhost:4200
-
- 
-<b>Backend -</b>
-Install JDK 11.0.11
-Install docker -v 20.10.7
-Install docker-compose -v 1.8.0
-
-Navigate to spring-backend subfolder:
-
-<pre>cd spring-backend</pre>
-
-Run the project with:
-
-<pre>docker-compose up --build</pre>
-
-
-The project has the following endpoints:
-
-IMPORTANT: to explore api enter url:  /v3/api-docs
-
-http://localhost:8080/swagger-ui/index.html
-
-
-NOTE: Testing API 
-
--/signup (create client-user) or /register (create business-user)
-
--/authenticate (returns JWT authentication token)
-
--use JWT token in order to authorize access to secured endpoints (click the lock icon or use the Authorize button on the upper right corner - then paste JWT Token )
-
-NOTE: /notification endpoint will return an internal server error if you don't specify spring.mail credentials first.
-
-<pre>The backend will run on http://localhost:8080 </pre>
-
-<b>Spring Mail</b>
-
-Make sure to specify a valid spring.mail.username and spring.mail.password in the application.properties file in order to be able to send an Email confirmation for updating user entries.
-
-IMPORTANT: if you decide not to specify mail credentials, you will get javax.mail.AuthenticationFailedException. The rest of the application should work normally despite this exception.
-
-
+### Optional: Email notifications
+Password-reset emails require valid `spring.mail.username` /
+`spring.mail.password` values in `application.properties`. Without them,
+the rest of the app still works — only the notification endpoint will fail.
