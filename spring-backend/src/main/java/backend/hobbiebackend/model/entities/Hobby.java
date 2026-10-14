@@ -23,8 +23,18 @@ public class Hobby extends BaseEntity {
     private String galleryImg2_id;
     private String galleryImg3_id;
     private String contactInfo;
+    private String embedding;
 
     public Hobby() {
+    }
+
+    @Column(name = "embedding", columnDefinition = "TEXT")
+    public String getEmbedding() {
+        return embedding;
+    }
+
+    public void setEmbedding(String embedding) {
+        this.embedding = embedding;
     }
 
     @Column(name = "profile_img_id")

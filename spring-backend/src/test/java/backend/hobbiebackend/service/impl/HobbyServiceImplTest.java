@@ -40,9 +40,10 @@ class HobbyServiceImplTest {
         appClient = new AppClient();
         Cloudinary cloudinary = mock(Cloudinary.class);
         UserService userServiceTest = mock(UserService.class);
+        EmbeddingService embeddingServiceTest = mock(EmbeddingService.class);
 
         hobbyServiceToTest = new HobbyServiceImpl
-                (mockHobbyRepository, categoryServiceTest, userServiceTest, locationServiceTest, cloudinary);
+                (mockHobbyRepository, categoryServiceTest, userServiceTest, locationServiceTest, cloudinary, embeddingServiceTest);
 
         // prepare hobby data
         hobby = new Hobby();

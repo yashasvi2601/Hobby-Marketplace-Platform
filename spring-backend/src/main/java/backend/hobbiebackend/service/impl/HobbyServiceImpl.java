@@ -6,34 +6,44 @@ import backend.hobbiebackend.model.entities.enums.CategoryNameEnum;
 import backend.hobbiebackend.model.entities.enums.LocationEnum;
 import backend.hobbiebackend.model.repostiory.HobbyRepository;
 import backend.hobbiebackend.service.CategoryService;
+import backend.hobbiebackend.service.EmbeddingService;
 import backend.hobbiebackend.service.HobbyService;
 import backend.hobbiebackend.service.LocationService;
 import backend.hobbiebackend.service.UserService;
 import com.cloudinary.Cloudinary;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
 public class HobbyServiceImpl implements HobbyService {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int MAX_MATCHES = 10;
+
     private final HobbyRepository hobbyRepository;
     private final CategoryService categoryService;
     private final UserService userService;
     private final LocationService locationService;
     private final Cloudinary cloudinary;
+    private final EmbeddingService embeddingService;
 
     @Autowired
-    public HobbyServiceImpl(HobbyRepository hobbyRepository, CategoryService categoryService, UserService userService, LocationService locationService, Cloudinary cloudinary) {
+    public HobbyServiceImpl(HobbyRepository hobbyRepository, CategoryService categoryService, UserService userService, LocationService locationService, Cloudinary cloudinary, EmbeddingService embeddingService) {
         this.hobbyRepository = hobbyRepository;
         this.categoryService = categoryService;
         this.userService = userService;
         this.locationService = locationService;
         this.cloudinary = cloudinary;
+        this.embeddingService = embeddingService;
     }
 
     @Override
@@ -53,6 +63,7 @@ public class HobbyServiceImpl implements HobbyService {
         if (byId.isPresent()) {
             deleteResourcesById(byId.get());
         }
+        applyEmbedding(hobby);
         this.hobbyRepository.save(hobby);
     }
 
@@ -84,44 +95,145 @@ public class HobbyServiceImpl implements HobbyService {
     @Override
     public Set<Hobby> findHobbyMatches(String username) {
         AppClient currentUserAppClient = this.userService.findAppClientByUsername(username);
+        Test testResults = currentUserAppClient.getTestResults();
+        if (testResults == null) {
+            return new LinkedHashSet<>();
+        }
+
+        Location locationByName = this.locationService.getLocationByName(testResults.getLocation());
+        List<Hobby> allByLocation = this.hobbyRepository.findAllByLocation(locationByName);
+        if (allByLocation.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+
+        Set<Hobby> semanticMatches = findHobbyMatchesBySimilarity(allByLocation, testResults);
+        if (semanticMatches != null) {
+            return semanticMatches;
+        }
+
+        // Embeddings unavailable (no API key configured, or the provider call
+        // failed) - fall back to the original random-sample + category-match logic.
+        return findHobbyMatchesByCategory(allByLocation, testResults);
+    }
+
+    /**
+     * Ranks hobbies by cosine similarity between the user's test-result profile
+     * and each hobby's stored embedding. Returns null (rather than an empty set)
+     * when embeddings aren't available, so the caller can distinguish "no AI
+     * match possible" from "AI matched nothing".
+     */
+    private Set<Hobby> findHobbyMatchesBySimilarity(List<Hobby> allByLocation, Test testResults) {
+        double[] profileEmbedding = this.embeddingService.embed(buildProfileText(testResults));
+        if (profileEmbedding == null) {
+            return null;
+        }
+
+        List<Map.Entry<Hobby, double[]>> withEmbeddings = allByLocation.stream()
+                .map(hobby -> Map.entry(hobby, deserializeEmbedding(hobby.getEmbedding())))
+                .filter(entry -> entry.getValue() != null)
+                .collect(Collectors.toList());
+
+        if (withEmbeddings.isEmpty()) {
+            return null;
+        }
+
+        return withEmbeddings.stream()
+                .sorted(Comparator.<Map.Entry<Hobby, double[]>>comparingDouble(
+                        entry -> cosineSimilarity(profileEmbedding, entry.getValue())).reversed())
+                .limit(MAX_MATCHES)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Set<Hobby> findHobbyMatchesByCategory(List<Hobby> allByLocation, Test testResults) {
         Set<Hobby> hobby_matches = new HashSet<>();
-        if (currentUserAppClient.getTestResults() != null) {
-            boolean isAdded = false;
-            Random rand = new Random();
-            LocationEnum location = currentUserAppClient.getTestResults().getLocation();
-            Location locationByName = this.locationService.getLocationByName(location);
-            List<Hobby> allByLocation = this.hobbyRepository.findAllByLocation(locationByName);
-            List<CategoryNameEnum> testCategoryResults = new ArrayList<>();
+        boolean isAdded = false;
+        Random rand = new Random();
+        List<CategoryNameEnum> testCategoryResults = List.of(
+                testResults.getCategoryOne(), testResults.getCategoryTwo(), testResults.getCategoryThree(),
+                testResults.getCategoryFour(), testResults.getCategoryFive(), testResults.getCategorySix());
 
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategoryOne());
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategoryTwo());
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategoryThree());
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategoryFour());
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategoryFive());
-            testCategoryResults.add(currentUserAppClient.getTestResults().getCategorySix());
-
-            if (allByLocation.size() > 0) {
-
-                for (int i = 0; i < 10; i++) {
-                    int randomIndex = rand.nextInt(allByLocation.size());
-                    Hobby randomHobby = allByLocation.get(randomIndex);
-                    if (hobby_matches.contains(randomHobby)) {
-                        continue;
-                    }
-                    for (CategoryNameEnum testCategory : testCategoryResults) {
-                        if (randomHobby.getCategory().getName().equals(testCategory)) {
-                            hobby_matches.add(randomHobby);
-                            isAdded = true;
-                        }
-                        if (isAdded) {
-                            isAdded = false;
-                            break;
-                        }
-                    }
+        for (int i = 0; i < MAX_MATCHES; i++) {
+            int randomIndex = rand.nextInt(allByLocation.size());
+            Hobby randomHobby = allByLocation.get(randomIndex);
+            if (hobby_matches.contains(randomHobby)) {
+                continue;
+            }
+            for (CategoryNameEnum testCategory : testCategoryResults) {
+                if (randomHobby.getCategory().getName().equals(testCategory)) {
+                    hobby_matches.add(randomHobby);
+                    isAdded = true;
+                }
+                if (isAdded) {
+                    isAdded = false;
+                    break;
                 }
             }
         }
         return hobby_matches;
+    }
+
+    private String buildProfileText(Test testResults) {
+        return "Looking for hobbies related to: " +
+                testResults.getCategoryOne() + ", " + testResults.getCategoryTwo() + ", " +
+                testResults.getCategoryThree() + ", " + testResults.getCategoryFour() + ", " +
+                testResults.getCategoryFive() + ", " + testResults.getCategorySix() +
+                ". Location: " + testResults.getLocation() + ".";
+    }
+
+    private double cosineSimilarity(double[] a, double[] b) {
+        if (a.length != b.length) {
+            return -1;
+        }
+        double dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (normA == 0 || normB == 0) {
+            return 0;
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    private void applyEmbedding(Hobby hobby) {
+        double[] vector = this.embeddingService.embed(buildHobbyText(hobby));
+        hobby.setEmbedding(serializeEmbedding(vector));
+    }
+
+    private String buildHobbyText(Hobby hobby) {
+        StringBuilder sb = new StringBuilder();
+        if (hobby.getName() != null) sb.append(hobby.getName()).append(". ");
+        if (hobby.getSlogan() != null) sb.append(hobby.getSlogan()).append(". ");
+        if (hobby.getIntro() != null) sb.append(hobby.getIntro()).append(". ");
+        if (hobby.getDescription() != null) sb.append(hobby.getDescription()).append(". ");
+        if (hobby.getCategory() != null && hobby.getCategory().getName() != null) {
+            sb.append("Category: ").append(hobby.getCategory().getName()).append(".");
+        }
+        return sb.toString();
+    }
+
+    private String serializeEmbedding(double[] vector) {
+        if (vector == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(vector);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    private double[] deserializeEmbedding(String json) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.readValue(json, double[].class);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     @Override
@@ -175,6 +287,7 @@ public class HobbyServiceImpl implements HobbyService {
 
     @Override
     public void createHobby(Hobby offer) {
+        applyEmbedding(offer);
         this.hobbyRepository.save(offer);
     }
 
@@ -211,6 +324,7 @@ public class HobbyServiceImpl implements HobbyService {
                 hobby.setContactInfo("business@example.com");
                 hobby.setProfileImgUrl("https://picsum.photos/seed/" + ((String) row[0]).replace(" ", "") + "/600/400");
 
+                applyEmbedding(hobby);
                 this.hobbyRepository.save(hobby);
                 hobbyOffers.add(hobby);
                 seeded.add(hobby);

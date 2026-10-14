@@ -13,9 +13,12 @@ list and manage their own offers.
 - **Business owners** sign up separately, and can create, edit, and delete
   hobby listings (name, description, price, category, location, photos,
   contact info).
-- Matching is rule-based: listings are filtered by the user's selected
-  location, then checked against the categories picked in the quiz. There's
-  no ML/AI involved — it's a straightforward filter over the data.
+- Matching uses AI embeddings when configured: listings are filtered by the
+  user's selected location, then ranked by semantic similarity (cosine
+  similarity over Gemini embeddings) between the hobby's description and
+  the user's quiz answers. Without an embeddings API key, it falls back to
+  the original rule-based logic — filter by location, then keep listings
+  whose category matches one of the quiz answers.
 - Authentication is JWT-based, with three roles: `USER`, `BUSINESS_USER`, and
   `ADMIN`.
 
@@ -89,3 +92,11 @@ Runs on `http://localhost:4200` and talks to the backend on `:8080`.
 Password-reset emails require valid `spring.mail.username` /
 `spring.mail.password` values in `application.properties`. Without them,
 the rest of the app still works — only the notification endpoint will fail.
+
+### Optional: AI-powered hobby matching
+Set `gemini.api.key` in `application.properties` (get a free key at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey)) to enable
+semantic matching. Each
+hobby listing is embedded on create/update, and matches are ranked by cosine
+similarity against the user's quiz profile instead of the plain category
+filter. Leave it blank and the app works exactly as before, with no AI call.
